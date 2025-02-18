@@ -20,6 +20,7 @@ use League\Flysystem\UnableToDeleteFile;
 use League\Flysystem\UnableToMoveFile;
 use League\Flysystem\UnableToReadFile;
 use League\Flysystem\UnableToRetrieveMetadata;
+use League\Flysystem\UnableToSetVisibility;
 use League\Flysystem\UnableToWriteFile;
 use League\MimeTypeDetection\FinfoMimeTypeDetector;
 use League\MimeTypeDetection\MimeTypeDetector;
@@ -44,7 +45,7 @@ class DirectCloudAdapter implements FilesystemAdapter
         $location = $this->applyPathPrefix($path);
 
         try {
-            $fileSeq = $this->client->getFileSeq($location);
+            $fileSeq = $this->getFileSeq($location);
 
             return ! is_null($fileSeq);
         } catch (BadRequest) {
@@ -57,7 +58,7 @@ class DirectCloudAdapter implements FilesystemAdapter
         $location = $this->applyPathPrefix($path);
 
         try {
-            $node = $this->client->getFolderNode($location, true);
+            $node = $this->getFolderNode($location);
 
             return ! is_null($node);
         } catch (BadRequest) {
@@ -68,9 +69,10 @@ class DirectCloudAdapter implements FilesystemAdapter
     public function write(string $path, string $contents, Config $config): void
     {
         $location = $this->applyPathPrefix($path);
+        $node     = $this->getFolderNode($location);
 
         try {
-            $this->client->uploadFile($location, $contents);
+            $this->client->upload($node, $contents);
         } catch (BadRequest $exception) {
             throw UnableToWriteFile::atLocation($location, $exception->getMessage(), $exception);
         }
@@ -79,9 +81,10 @@ class DirectCloudAdapter implements FilesystemAdapter
     public function writeStream(string $path, $contents, Config $config): void
     {
         $location = $this->applyPathPrefix($path);
+        $node     = $this->getFolderNode($location);
 
         try {
-            $this->client->uploadFile($location, $contents);
+            $this->client->upload($node, $contents);
         } catch (BadRequest $exception) {
             throw UnableToWriteFile::atLocation($location, $exception->getMessage(), $exception);
         }
@@ -102,9 +105,10 @@ class DirectCloudAdapter implements FilesystemAdapter
     public function readStream(string $path)
     {
         $location = $this->applyPathPrefix($path);
+        $fileSeq  = $this->getFileSeq($location);
 
         try {
-            $stream = $this->client->downloadFile($location);
+            $stream = $this->client->download($fileSeq);
         } catch (BadRequest $exception) {
             throw UnableToReadFile::fromLocation($location, $exception->getMessage(), $exception);
         }
@@ -114,15 +118,23 @@ class DirectCloudAdapter implements FilesystemAdapter
 
     public function delete(string $path): void
     {
-        // TODO: Implement delete() method.
-        dd($path);
+        $location      = $this->applyPathPrefix($path);
+        $parentFolderNode = $this->getFolderNode(dirname($location));
+        $fileSeq       = $this->getFileSeq($location);
+
+        try {
+            $this->client->deleteFile($parentFolderNode, $fileSeq);
+        } catch (BadRequest $exception) {
+            throw UnableToDeleteDirectory::atLocation($location, $exception->getMessage());
+        }
     }
 
     public function deleteDirectory(string $path): void
     {
         $location = $this->applyPathPrefix($path);
+        $node     = $this->getFolderNode($location);
         try {
-            $this->client->deleteFolder($location);
+            $this->client->deleteFolder($node);
         } catch (BadRequest $exception) {
             throw UnableToDeleteDirectory::atLocation($location, $exception->getMessage());
         }
@@ -131,33 +143,52 @@ class DirectCloudAdapter implements FilesystemAdapter
     public function createDirectory(string $path, Config $config): void
     {
         $location = $this->applyPathPrefix($path);
-        try {
-            $this->client->createFolder($location);
-        } catch (BadRequest $exception) {
-            throw UnableToCreateDirectory::atLocation($location, $exception->getMessage());
+
+        $parts = explode('/', $location);
+        $parts = array_values(array_filter($parts));
+
+        // 作成済みの最も深いフォルダのノードを取得
+        for ($i = 1, $iMax = count($parts); $i <= $iMax; $i++) {
+            if ($deepestFolderNode = $this->getFolderNode(dirname($location, $i))) {
+                break;
+            }
+        }
+
+        for ($j = $i; $j > 0; $j--) {
+            try {
+                $response = $this->client->createFolder($deepestFolderNode, $parts[$iMax - $j]);
+            } catch (BadRequest $exception) {
+                throw UnableToCreateDirectory::atLocation($location, $exception->getMessage());
+            }
+
+            $deepestFolderNode = $response['node'];
         }
     }
 
     public function setVisibility(string $path, string $visibility): void
     {
-        // TODO: Implement setVisibility() method.
-        dd($path, $visibility);
+        $location = $this->applyPathPrefix($path);
+
+        throw UnableToSetVisibility::atLocation($location, 'Adapter does not support visibility controls.');
     }
 
     public function visibility(string $path): FileAttributes
     {
-        // TODO: Implement visibility() method.
-        dd($path);
+        $location = $this->applyPathPrefix($path);
+        // Noop
+        return new FileAttributes($location);
     }
 
     public function mimeType(string $path): FileAttributes
     {
+        $location = $this->applyPathPrefix($path);
+
         return new FileAttributes(
-            $path,
+            $location,
             null,
             null,
             null,
-            $this->mimeTypeDetector->detectMimeTypeFromPath($path)
+            $this->mimeTypeDetector->detectMimeTypeFromPath($location)
         );
     }
 
@@ -230,5 +261,70 @@ class DirectCloudAdapter implements FilesystemAdapter
     protected function applyPathPrefix($path): string
     {
         return '/'.trim($this->prefixer->prefixPath($path), '/');
+    }
+
+    protected function getFileSeq($path)
+    {
+        $parts = explode('/', $path);
+        $parts = array_values(array_filter($parts));
+
+        if ($deepestFolderNode = $this->getFolderNode(dirname($path, 1), true)) {
+            $fileName = $parts[array_key_last($parts)];
+
+            $files = $this->client->getFileList($deepestFolderNode);
+
+            if ($files) {
+                if (($list = array_search($fileName, array_column($files, 'name'))) !== false) {
+                    return $files[$list]['file_seq'];
+                }
+
+                // ファイルが見つからない
+                return null;
+            }
+
+            // 指定のフォルダにファイルがない
+            return null;
+        }
+
+        // フォルダが見つからない
+        return null;
+    }
+
+    protected function getFolderNode($path)
+    {
+        $path  = rtrim($path, '/');
+        $parts = explode('/', $path);
+        $parts = array_values(array_filter($parts));
+
+        $directoryParts = [];
+        $node           = '1{2';
+
+        foreach ($parts as $directory) {
+            if ($directory === '.' || $directory === '') {
+                continue;
+            }
+
+            $directoryParts[] = $directory;
+            $directoryPath    = implode('/', $directoryParts);
+            $location         = '/'.$directoryPath;
+
+            $folders = $this->client->getFolderList($node);
+
+            if ($folders) {
+                if (($list = array_search($location, array_column($folders, 'drive_path'))) !== false) {
+                    $node = $folders[$list]['node'];
+                    if ($path === $location) {
+                        return $node;
+                    }
+                } elseif ($path === $location) {
+                    return null;
+                }
+            } else {
+                // フォルダが存在しない
+                return null;
+            }
+        }
+
+        return null;
     }
 }
