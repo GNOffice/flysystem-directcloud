@@ -248,6 +248,7 @@ class DirectCloudAdapter implements FilesystemAdapter
     {
         // 指定したパスに含まれるディレクトリとファイルの一覧を取得する
         // TODO: Implement listContents() method.
+//        $timestamp = (isset($response['server_modified'])) ? strtotime($response['server_modified']) : null;
 //        if ($response['.tag'] === 'folder') {
 //            $normalizedPath = ltrim($this->prefixer->stripDirectoryPrefix($response['path_display']), '/');
 //
