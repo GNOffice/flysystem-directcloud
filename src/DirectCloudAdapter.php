@@ -125,7 +125,7 @@ class DirectCloudAdapter implements FilesystemAdapter
         try {
             $this->client->deleteFile($parentFolderNode, $fileSeq);
         } catch (BadRequest $exception) {
-            throw UnableToDeleteDirectory::atLocation($location, $exception->getMessage());
+            throw UnableToDeleteFile::atLocation($location, $exception->getMessage());
         }
     }
 
@@ -167,16 +167,13 @@ class DirectCloudAdapter implements FilesystemAdapter
 
     public function setVisibility(string $path, string $visibility): void
     {
-        $location = $this->applyPathPrefix($path);
-
-        throw UnableToSetVisibility::atLocation($location, 'Adapter does not support visibility controls.');
+        throw UnableToSetVisibility::atLocation($path, 'Adapter does not support visibility controls.');
     }
 
     public function visibility(string $path): FileAttributes
     {
-        $location = $this->applyPathPrefix($path);
         // Noop
-        return new FileAttributes($location);
+        return new FileAttributes($path);
     }
 
     public function mimeType(string $path): FileAttributes
@@ -184,11 +181,11 @@ class DirectCloudAdapter implements FilesystemAdapter
         $location = $this->applyPathPrefix($path);
 
         return new FileAttributes(
-            $location,
+            $path,
             null,
             null,
             null,
-            $this->mimeTypeDetector->detectMimeTypeFromPath($location)
+            $this->mimeTypeDetector->detectMimeTypeFromPath($path)
         );
     }
 
@@ -196,13 +193,23 @@ class DirectCloudAdapter implements FilesystemAdapter
     {
         $location = $this->applyPathPrefix($path);
 
+        $parentFolderNode = $this->getFolderNode(dirname($location));
+        if (is_null($parentFolderNode)) {
+            throw UnableToRetrieveMetadata::lastModified($location, 'File not found.');
+        }
+
+        $fileSeq = $this->getFileSeq($location);
+        if (is_null($fileSeq)) {
+            throw UnableToRetrieveMetadata::lastModified($location, 'File not found.');
+        }
+
         try {
-            $response = $this->client->getFileInfo($location);
+            $response = $this->client->getFileInfo($parentFolderNode, $fileSeq);
         } catch (BadRequest $exception) {
             throw UnableToRetrieveMetadata::lastModified($location, $exception->getMessage());
         }
 
-        $timestamp = (isset($response['datetime'])) ? strtotime($response['datetime']) : null;
+        $timestamp = (isset($response['result']['datetime'])) ? strtotime($response['result']['datetime']) : null;
 
         return new FileAttributes(
             $path,
@@ -215,22 +222,52 @@ class DirectCloudAdapter implements FilesystemAdapter
     public function fileSize(string $path): FileAttributes
     {
         $location = $this->applyPathPrefix($path);
+        $parentFolderNode = $this->getFolderNode(dirname($location));
+        if (is_null($parentFolderNode)) {
+            throw UnableToRetrieveMetadata::fileSize($location, 'File not found.');
+        }
+
+        $fileSeq = $this->getFileSeq($location);
+        if (is_null($fileSeq)) {
+            throw UnableToRetrieveMetadata::fileSize($location, 'File not found.');
+        }
 
         try {
-            $response = $this->client->getFileInfo($location);
+            $response = $this->client->getFileInfo($parentFolderNode, $fileSeq);
         } catch (BadRequest $exception) {
             throw UnableToRetrieveMetadata::fileSize($location, $exception->getMessage());
         }
 
         return new FileAttributes(
             $path,
-            $response['size'] ?? null
+            $response['result']['size'] ?? null
         );
     }
 
     public function listContents(string $path, bool $deep): iterable
     {
+        // 指定したパスに含まれるディレクトリとファイルの一覧を取得する
         // TODO: Implement listContents() method.
+//        if ($response['.tag'] === 'folder') {
+//            $normalizedPath = ltrim($this->prefixer->stripDirectoryPrefix($response['path_display']), '/');
+//
+//            return new DirectoryAttributes(
+//                $normalizedPath,
+//                null,
+//                $timestamp
+//            );
+//        }
+//
+//        $normalizedPath = ltrim($this->prefixer->stripPrefix($response['path_display']), '/');
+//
+//        return new FileAttributes(
+//            $normalizedPath,
+//            $response['size'] ?? null,
+//            null,
+//            $timestamp,
+//            $this->mimeTypeDetector->detectMimeTypeFromPath($normalizedPath)
+//        );
+
         dd($path, $deep);
     }
 
