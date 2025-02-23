@@ -43,6 +43,11 @@ class DirectCloudAdapter implements FilesystemAdapter
         $this->mimeTypeDetector = $mimeTypeDetector ?? new FinfoMimeTypeDetector();
     }
 
+    public function getClient(): Client
+    {
+        return $this->client;
+    }
+
     public function fileExists(string $path): bool
     {
         $location = $this->applyPathPrefix($path);
