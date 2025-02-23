@@ -2,14 +2,17 @@
 
 namespace GNOffice\FlysystemDirectCloud;
 
+use Exception;
 use GNOffice\DirectCloud\Exceptions\BadRequest;
 use GNOffice\Directcloud\Client;
 use League\Flysystem\Config;
+use League\Flysystem\DirectoryAttributes;
 use League\Flysystem\FileAttributes;
 use League\Flysystem\FilesystemAdapter;
 use League\Flysystem\PathPrefixer;
 use League\Flysystem\FilesystemException;
 use League\Flysystem\InvalidVisibilityProvided;
+use League\Flysystem\StorageAttributes;
 use League\Flysystem\UnableToCheckDirectoryExistence;
 use League\Flysystem\UnableToCheckExistence;
 use League\Flysystem\UnableToCheckFileExistence;
@@ -17,6 +20,7 @@ use League\Flysystem\UnableToCopyFile;
 use League\Flysystem\UnableToCreateDirectory;
 use League\Flysystem\UnableToDeleteDirectory;
 use League\Flysystem\UnableToDeleteFile;
+use League\Flysystem\UnableToListContents;
 use League\Flysystem\UnableToMoveFile;
 use League\Flysystem\UnableToReadFile;
 use League\Flysystem\UnableToRetrieveMetadata;
@@ -24,7 +28,6 @@ use League\Flysystem\UnableToSetVisibility;
 use League\Flysystem\UnableToWriteFile;
 use League\MimeTypeDetection\FinfoMimeTypeDetector;
 use League\MimeTypeDetection\MimeTypeDetector;
-use Throwable;
 
 class DirectCloudAdapter implements FilesystemAdapter
 {
@@ -244,56 +247,68 @@ class DirectCloudAdapter implements FilesystemAdapter
         );
     }
 
-    public function listContents(string $path, bool $deep): iterable
+    public function listContents(string $path = '', bool $deep = false): iterable
     {
-        // 指定したパスに含まれるディレクトリとファイルの一覧を取得する
-        // TODO: Implement listContents() method.
-//        $timestamp = (isset($response['server_modified'])) ? strtotime($response['server_modified']) : null;
-//        if ($response['.tag'] === 'folder') {
-//            $normalizedPath = ltrim($this->prefixer->stripDirectoryPrefix($response['path_display']), '/');
-//
-//            return new DirectoryAttributes(
-//                $normalizedPath,
-//                null,
-//                $timestamp
-//            );
-//        }
-//
-//        $normalizedPath = ltrim($this->prefixer->stripPrefix($response['path_display']), '/');
-//
-//        return new FileAttributes(
-//            $normalizedPath,
-//            $response['size'] ?? null,
-//            null,
-//            $timestamp,
-//            $this->mimeTypeDetector->detectMimeTypeFromPath($normalizedPath)
-//        );
+        $location = $this->applyPathPrefix($path);
+        $node = $this->getFolderNode($location);
+        if (is_null($node)) {
+            throw UnableToListContents::atLocation($location, $deep, new Exception('Directory not found.'));
+        }
 
-        dd($path, $deep);
+        $response = $this->client->getList($node);
+
+        foreach ($response['folders'] as $folder) {
+            $normalizedPath = ltrim($this->prefixer->stripDirectoryPrefix($folder['drive_path']), '/');
+
+            if ($deep) {
+                yield from $this->listContents($normalizedPath, $deep);
+            }
+
+            yield new DirectoryAttributes(
+                $normalizedPath,
+                null,
+                (isset($folder['datetime_at'])) ? strtotime($folder['datetime_at']) : null
+            );
+        }
+
+        // ファイルの一覧
+        foreach ($response['files'] as $file) {
+            $normalizedPath = ltrim($this->prefixer->stripDirectoryPrefix($location . '/' . $file['name']), '/');
+
+            yield new FileAttributes(
+                $normalizedPath,
+                $file['size'] ?? null,
+                null,
+                (isset($file['datetime_at'])) ? strtotime($file['datetime_at']) : null,
+                $this->mimeTypeDetector->detectMimeTypeFromPath($normalizedPath)
+            );
+        }
     }
 
     public function move(string $source, string $destination, Config $config): void
     {
-        // TODO: Implement move() method.
-        dd($source, $destination, $config);
+        $srcNode = $this->getFolderNode(dirname($this->applyPathPrefix($source)));
+        $dstNode = $this->getFolderNode(dirname($this->applyPathPrefix($destination)));
+        $fileSeq = $this->getFileSeq($this->applyPathPrefix($source));
+
+        $this->client->moveFile($dstNode, $srcNode, $fileSeq);
+
+        if (basename($source) !== basename($destination)) {
+            $this->client->renameFile($dstNode, $fileSeq, basename($destination));
+        }
     }
 
     public function copy(string $source, string $destination, Config $config): void
     {
-        // TODO: Implement copy() method.
-        dd($source, $destination, $config);
-    }
+        $srcNode = $this->getFolderNode(dirname($this->applyPathPrefix($source)));
+        $dstNode = $this->getFolderNode(dirname($this->applyPathPrefix($destination)));
+        $fileSeq = $this->getFileSeq($this->applyPathPrefix($source));
 
-    public function createDirectoryLink(string $path, $expirationDate, $password): string
-    {
-        $location = $this->applyPathPrefix($path);
+        $response = $this->client->copyFile($dstNode, $srcNode, $fileSeq);
 
-        return $this->client->createLink('folder', $location, $expirationDate, $password);
-    }
-
-    public function createFileLink(string $path): string
-    {
-        return 'test';
+        if (basename($source) !== basename($destination)) {
+            $this->client->renameFile($dstNode, $response['data']['new_file_seq'], basename($destination));
+        }
     }
 
     protected function applyPathPrefix($path): string
@@ -309,7 +324,7 @@ class DirectCloudAdapter implements FilesystemAdapter
         if ($deepestFolderNode = $this->getFolderNode(dirname($path, 1), true)) {
             $fileName = $parts[array_key_last($parts)];
 
-            $files = $this->client->getFileList($deepestFolderNode);
+            $files = $this->client->getList($deepestFolderNode)['files'];
 
             if ($files) {
                 if (($list = array_search($fileName, array_column($files, 'name'))) !== false) {
@@ -346,7 +361,7 @@ class DirectCloudAdapter implements FilesystemAdapter
             $directoryPath    = implode('/', $directoryParts);
             $location         = '/'.$directoryPath;
 
-            $folders = $this->client->getFolderList($node);
+            $folders = $this->client->getList($node)['folders'];
 
             if ($folders) {
                 if (($list = array_search($location, array_column($folders, 'drive_path'))) !== false) {
