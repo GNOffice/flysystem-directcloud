@@ -74,27 +74,31 @@ class DirectCloudAdapter implements FilesystemAdapter
         }
     }
 
-    public function write(string $path, string $contents, Config $config): void
+    public function write(string $path, $contents, Config $config): void
     {
         $location = $this->applyPathPrefix($path);
-        $node = $this->getFolderNodeAndSeq($location)['node'];
 
-        try {
-            $this->client->upload($node, $contents);
-        } catch (BadRequest $exception) {
-            throw UnableToWriteFile::atLocation($location, $exception->getMessage(), $exception);
+        if ($this->getFolderNodeAndSeq(dirname($location))['node']) {
+            $this->client->upload($this->getFolderNodeAndSeq(dirname($location))['node'], $contents,
+                basename($location));
+        } else {
+            $this->createDirectory(dirname($location), $config);
+
+            $this->write($path, $contents, $config);
         }
     }
 
     public function writeStream(string $path, $contents, Config $config): void
     {
         $location = $this->applyPathPrefix($path);
-        $node = $this->getFolderNodeAndSeq($location)['node'];
 
-        try {
-            $this->client->upload($node, $contents);
-        } catch (BadRequest $exception) {
-            throw UnableToWriteFile::atLocation($location, $exception->getMessage(), $exception);
+        if ($this->getFolderNodeAndSeq(dirname($location))['node']) {
+            $this->client->upload($this->getFolderNodeAndSeq(dirname($location))['node'], $contents,
+                basename($location));
+        } else {
+            $this->createDirectory(dirname($location), $config);
+
+            $this->writeStream($path, $contents, $config);
         }
     }
 
