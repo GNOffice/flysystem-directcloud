@@ -370,12 +370,12 @@ class DirectCloudAdapter implements FilesystemAdapter
 
             if ($folders) {
                 if (($list = array_search($location, array_column($folders, 'drive_path'))) !== false) {
-                    $response = [
-                        'node' => $folders[$list]['node'],
-                        'seq'  => $folders[$list]['dir_seq'],
-                    ];
+                    $node = $folders[$list]['node'];
                     if ($path === $location) {
-                        return $response;
+                        return [
+                            'node' => $folders[$list]['node'],
+                            'seq'  => $folders[$list]['dir_seq'],
+                        ];
                     }
                 } elseif ($path === $location) {
                     return null;
