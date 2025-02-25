@@ -66,7 +66,7 @@ class DirectCloudAdapter implements FilesystemAdapter
         $location = $this->applyPathPrefix($path);
 
         try {
-            $node = $this->getFolderNode($location);
+            $node = $this->getFolderNodeAndSeq($location)['node'];
 
             return ! is_null($node);
         } catch (BadRequest) {
@@ -77,7 +77,7 @@ class DirectCloudAdapter implements FilesystemAdapter
     public function write(string $path, string $contents, Config $config): void
     {
         $location = $this->applyPathPrefix($path);
-        $node     = $this->getFolderNode($location);
+        $node = $this->getFolderNodeAndSeq($location)['node'];
 
         try {
             $this->client->upload($node, $contents);
@@ -89,7 +89,7 @@ class DirectCloudAdapter implements FilesystemAdapter
     public function writeStream(string $path, $contents, Config $config): void
     {
         $location = $this->applyPathPrefix($path);
-        $node     = $this->getFolderNode($location);
+        $node = $this->getFolderNodeAndSeq($location)['node'];
 
         try {
             $this->client->upload($node, $contents);
@@ -127,7 +127,7 @@ class DirectCloudAdapter implements FilesystemAdapter
     public function delete(string $path): void
     {
         $location      = $this->applyPathPrefix($path);
-        $parentFolderNode = $this->getFolderNode(dirname($location));
+        $parentFolderNode = $this->getFolderNodeAndSeq(dirname($location))['node'];
         $fileSeq       = $this->getFileSeq($location);
 
         try {
@@ -140,7 +140,7 @@ class DirectCloudAdapter implements FilesystemAdapter
     public function deleteDirectory(string $path): void
     {
         $location = $this->applyPathPrefix($path);
-        $node     = $this->getFolderNode($location);
+        $node = $this->getFolderNodeAndSeq($location)['node'];
         try {
             $this->client->deleteFolder($node);
         } catch (BadRequest $exception) {
@@ -157,7 +157,7 @@ class DirectCloudAdapter implements FilesystemAdapter
 
         // 作成済みの最も深いフォルダのノードを取得
         for ($i = 1, $iMax = count($parts); $i <= $iMax; $i++) {
-            if ($deepestFolderNode = $this->getFolderNode(dirname($location, $i))) {
+            if ($deepestFolderNode = $this->getFolderNodeAndSeq(dirname($location, $i))['node']) {
                 break;
             }
         }
@@ -201,7 +201,7 @@ class DirectCloudAdapter implements FilesystemAdapter
     {
         $location = $this->applyPathPrefix($path);
 
-        $parentFolderNode = $this->getFolderNode(dirname($location));
+        $parentFolderNode = $this->getFolderNodeAndSeq(dirname($location))['node'];
         if (is_null($parentFolderNode)) {
             throw UnableToRetrieveMetadata::lastModified($location, 'File not found.');
         }
@@ -230,7 +230,7 @@ class DirectCloudAdapter implements FilesystemAdapter
     public function fileSize(string $path): FileAttributes
     {
         $location = $this->applyPathPrefix($path);
-        $parentFolderNode = $this->getFolderNode(dirname($location));
+        $parentFolderNode = $this->getFolderNodeAndSeq(dirname($location))['node'];
         if (is_null($parentFolderNode)) {
             throw UnableToRetrieveMetadata::fileSize($location, 'File not found.');
         }
@@ -255,7 +255,7 @@ class DirectCloudAdapter implements FilesystemAdapter
     public function listContents(string $path = '', bool $deep = false): iterable
     {
         $location = $this->applyPathPrefix($path);
-        $node = $this->getFolderNode($location);
+        $node = $this->getFolderNodeAndSeq($location)['node'];
         if (is_null($node)) {
             throw UnableToListContents::atLocation($location, $deep, new Exception('Directory not found.'));
         }
@@ -292,8 +292,8 @@ class DirectCloudAdapter implements FilesystemAdapter
 
     public function move(string $source, string $destination, Config $config): void
     {
-        $srcNode = $this->getFolderNode(dirname($this->applyPathPrefix($source)));
-        $dstNode = $this->getFolderNode(dirname($this->applyPathPrefix($destination)));
+        $srcNode = $this->getFolderNodeAndSeq(dirname($this->applyPathPrefix($source)))['node'];
+        $dstNode = $this->getFolderNodeAndSeq(dirname($this->applyPathPrefix($destination)))['node'];
         $fileSeq = $this->getFileSeq($this->applyPathPrefix($source));
 
         $this->client->moveFile($dstNode, $srcNode, $fileSeq);
@@ -305,8 +305,8 @@ class DirectCloudAdapter implements FilesystemAdapter
 
     public function copy(string $source, string $destination, Config $config): void
     {
-        $srcNode = $this->getFolderNode(dirname($this->applyPathPrefix($source)));
-        $dstNode = $this->getFolderNode(dirname($this->applyPathPrefix($destination)));
+        $srcNode = $this->getFolderNodeAndSeq(dirname($this->applyPathPrefix($source)))['node'];
+        $dstNode = $this->getFolderNodeAndSeq(dirname($this->applyPathPrefix($destination)))['node'];
         $fileSeq = $this->getFileSeq($this->applyPathPrefix($source));
 
         $response = $this->client->copyFile($dstNode, $srcNode, $fileSeq);
@@ -326,7 +326,7 @@ class DirectCloudAdapter implements FilesystemAdapter
         $parts = explode('/', $path);
         $parts = array_values(array_filter($parts));
 
-        if ($deepestFolderNode = $this->getFolderNode(dirname($path, 1), true)) {
+        if ($deepestFolderNode = $this->getFolderNodeAndSeq(dirname($path, 1))['node']) {
             $fileName = $parts[array_key_last($parts)];
 
             $files = $this->client->getList($deepestFolderNode)['files'];
@@ -348,7 +348,7 @@ class DirectCloudAdapter implements FilesystemAdapter
         return null;
     }
 
-    protected function getFolderNode($path)
+    public function getFolderNodeAndSeq($path)
     {
         $path  = rtrim($path, '/');
         $parts = explode('/', $path);
@@ -370,9 +370,12 @@ class DirectCloudAdapter implements FilesystemAdapter
 
             if ($folders) {
                 if (($list = array_search($location, array_column($folders, 'drive_path'))) !== false) {
-                    $node = $folders[$list]['node'];
+                    $response = [
+                        'node' => $folders[$list]['node'],
+                        'seq'  => $folders[$list]['dir_seq'],
+                    ];
                     if ($path === $location) {
-                        return $node;
+                        return $response;
                     }
                 } elseif ($path === $location) {
                     return null;
