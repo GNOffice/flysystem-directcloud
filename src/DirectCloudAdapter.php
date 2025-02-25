@@ -78,9 +78,8 @@ class DirectCloudAdapter implements FilesystemAdapter
     {
         $location = $this->applyPathPrefix($path);
 
-        if ($this->getFolderNodeAndSeq(dirname($location))['node']) {
-            $this->client->upload($this->getFolderNodeAndSeq(dirname($location))['node'], $contents,
-                basename($location));
+        if ($node = $this->getFolderNodeAndSeq(dirname($location))['node']) {
+            $this->client->upload($node, $contents, basename($location));
         } else {
             $this->createDirectory(dirname($location), $config);
 
@@ -327,11 +326,8 @@ class DirectCloudAdapter implements FilesystemAdapter
 
     protected function getFileSeq($path)
     {
-        $parts = explode('/', $path);
-        $parts = array_values(array_filter($parts));
-
-        if ($deepestFolderNode = $this->getFolderNodeAndSeq(dirname($path, 1))['node']) {
-            $fileName = $parts[array_key_last($parts)];
+        if ($deepestFolderNode = $this->getFolderNodeAndSeq(dirname($path))['node']) {
+            $fileName = basename($path);
 
             $files = $this->client->getList($deepestFolderNode)['files'];
 
