@@ -348,7 +348,7 @@ class DirectCloudAdapter implements FilesystemAdapter
         return null;
     }
 
-    public function getFolderNodeAndSeq($path)
+    public function getFolderNodeAndSeq($path): ?array
     {
         $path  = rtrim($path, '/');
         $parts = explode('/', $path);
