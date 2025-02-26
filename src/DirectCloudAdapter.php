@@ -103,28 +103,26 @@ class DirectCloudAdapter implements FilesystemAdapter
 
     public function read(string $path): string
     {
-        $object = $this->readStream($path);
+        $location = $this->applyPathPrefix($path);
+        $fileSeq  = $this->getFileSeq($location);
 
-        $contents = stream_get_contents($object);
-        fclose($object);
-
-        unset($object);
-
+        try {
+            $contents = $this->client->download($fileSeq);
+        } catch (BadRequest $exception) {
+            throw UnableToReadFile::fromLocation($location, $exception->getMessage(), $exception);
+        }
         return $contents;
     }
 
     public function readStream(string $path)
     {
-        $location = $this->applyPathPrefix($path);
-        $fileSeq  = $this->getFileSeq($location);
+        $contents = $this->read($path);
 
-        try {
-            $stream = $this->client->download($fileSeq);
-        } catch (BadRequest $exception) {
-            throw UnableToReadFile::fromLocation($location, $exception->getMessage(), $exception);
-        }
+        $resource = tmpfile();
+        fwrite($resource, $contents);
+        rewind($resource);
 
-        return $stream;
+        return $resource;
     }
 
     public function delete(string $path): void
