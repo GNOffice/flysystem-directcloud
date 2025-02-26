@@ -10,7 +10,7 @@
   "require": {
     "league/flysystem": "^3.29",
     "php": "^8.1",
-    "gn-office/directcloud-api": "^1.6.1"
+    "gn-office/directcloud-api": "^1.6.2"
   },
   "license": "MIT",
   "autoload": {
