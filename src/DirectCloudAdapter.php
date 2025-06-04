@@ -66,9 +66,7 @@ class DirectCloudAdapter implements FilesystemAdapter
         $location = $this->applyPathPrefix($path);
 
         try {
-            $node = $this->getFolderNodeAndSeq($location)['node'];
-
-            return ! is_null($node);
+            return $this->getFolderNodeAndSeq($location) !== null;
         } catch (BadRequest) {
             return false;
         }
